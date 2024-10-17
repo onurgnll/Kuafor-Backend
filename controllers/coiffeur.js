@@ -286,7 +286,7 @@ const getReservationTypes = tryCatchWrapper(async (req, res, next) => {
         }
     })
 
-    return res.json(new Response(1, {types: newType}, ""))
+    return res.json(new Response(1, { types: newType }, ""))
 })
 const addReservationType = tryCatchWrapper(async (req, res, next) => {
 
@@ -313,6 +313,56 @@ const deleteReservationType = tryCatchWrapper(async (req, res, next) => {
 
 
 
+const listReservations = tryCatchWrapper(async (req, res, next) => {
+    const { date, isApproved } = req.body;
+
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999); // Son saniyeyi doğru ayarlayın
+
+    console.log(isApproved);
+    const reservations = await Reservation.findAll({
+        where: {
+            coiffeurID: req.coiffeur.result,
+            status: {
+                [Op.or]: ["payment_success", "waiting" , "rejected"]
+            },
+            isApproved: isApproved,
+            resDate: {
+                [Op.between]: [startDate, endDate]
+            }
+        },
+    });
+
+    // ReservationType sorgularını Promise.all ile topluca çalıştırın
+    const reservationss = await Promise.all(reservations.map(async (reservation) => {
+        const resTypes = await Promise.all(
+            reservation.resTypeIDs.map(typeID =>
+                ReservationType.findOne({ where: { id: typeID } })
+            )
+        );
+
+        return {
+            ...reservation.toJSON(), // Reservation nesnesini düz JSON'a dönüştürün
+            types: resTypes
+        };
+    }));
+
+    res.json(new Response(1, { reservations: reservationss }, ""));
+});
+
+
+const approveReservation = tryCatchWrapper(async (req, res, next) => {
+    const { resID, approve } = req.body
+
+    await Reservation.update({ isApproved: approve, status: "waiting" }, { where: { id: resID, status: "payment_success", resDate: { [Op.gte]: new Date() } } })
+
+
+    const reserv = await Reservation.findOne({ where: { id: resID } })
+    res.json(new Response(1, { reservation: reserv }, ""));
+})
+
 module.exports = {
     register,
     registerToIyzico,
@@ -324,6 +374,9 @@ module.exports = {
 
     getReservationTypes,
     addReservationType,
-    deleteReservationType
+    deleteReservationType,
+
+    listReservations,
+    approveReservation
 
 }

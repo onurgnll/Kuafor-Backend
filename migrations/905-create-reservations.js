@@ -51,6 +51,10 @@ module.exports = {
 
         type: Sequelize.STRING,
       },
+      paymentTransactionID: {
+
+        type: Sequelize.STRING,
+      },
       createdAt: {
         type: Sequelize.DATE,
         allowNull: false

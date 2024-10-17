@@ -48,15 +48,6 @@ module.exports = (sequelize, DataTypes) => {
       resTypeIDs: {
         type: DataTypes.ARRAY(DataTypes.INTEGER),
       },
-      paymentID: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        references: {
-          model: 'Payments',
-          key: 'id',
-        },
-        onDelete: 'CASCADE',
-      },
       totalPrice: {
         type: DataTypes.INTEGER,
       },
@@ -70,6 +61,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
       },
       status: {
+        type: DataTypes.STRING,
+      },
+      paymentTransactionID: {
+
         type: DataTypes.STRING,
       },
       createdAt: {
