@@ -12,6 +12,20 @@ const formatDate = (date) => {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
 };
 
+const newDate = (date) => {
+    if(date) {
+        const retDate = new Date(date)
+        retDate.setHours(retDate.getHours() + 3)
+        return retDate
+    }else{
+        const retDate = new Date()
+        retDate.setHours(retDate.getHours() + 3)
+        return retDate
+
+    }
+}
+
 module.exports = {
-    formatDate
+    formatDate,
+    newDate
 }

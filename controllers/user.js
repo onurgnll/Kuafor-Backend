@@ -13,6 +13,8 @@ const { v4: uuidv4 } = require('uuid');
 const Firebase = require('../utils/firebase');
 const { tryCatchWrapper } = require("../helpers/tryCatchWrapper");
 const Iyzipay = require("iyzipay");
+const { createUserNotification, createCoiffeurNotification } = require("./notifications");
+const { formatDate, newDate } = require("../helpers/formatDate");
 
 const iyzipay = new Iyzipay({
     apiKey: process.env.IYZICO_API_KEY,
@@ -130,6 +132,8 @@ const login = tryCatchWrapper(
 
 const createReservation = tryCatchWrapper(async (req, res, next) => {
 
+    const a = new Date()
+
     const { reservationTypeIDs, coiffeurID, resDate, cardHolderName, cardNumber, expireMonth, expireYear, cvc } = req.body
 
 
@@ -139,12 +143,13 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
 
     const coiffeurProps = await CoiffeurProperty.findOne({ where: { coiffeurID } })
 
+    if (newDate() > newDate(resDate)) return res.json(new Response(-1, null, "Geçmiş zamana res oluşturulamaz"))
+
 
     if (coiffeur.isApproved != true) return res.json(new Response(-1, null, "Kuaför onaylı değil."));
 
     if (coiffeur.iyzicoExternalID == null) return res.json(new Response(-1, null, "Kuaför iyzico kayıtlı değil."));
 
-    console.log(coiffeurProps);
     if (coiffeurProps.resActive == false) return res.json(new Response(-1, null, "Kuaför rezervasyonları devre dışı."));
 
     if (coiffeurProps.gender != user.gender) return res.json(new Response(-1, null, "Kuaför cinsiyete uygun değil."));
@@ -175,12 +180,15 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
     }
 
 
+    let resdatee = new Date(resDate)
+    resdatee.setHours(resdatee.getHours() + 3)
+
     const reservation = await Reservation.create({
         coiffeurID,
         userID: user.id,
         resTypeIDs: [...reservationTypeIDs],
         totalPrice: totalPrice,
-        resDate: new Date(resDate),
+        resDate: resdatee,
         isApproved: null,
         merchantOid: conversationID,
         status: "payment_started"
@@ -198,15 +206,13 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
 
 
 
-
     const request = {
         locale: 'tr',
-        conversationId: conversationID,         // üye işyerinin sipariş numarası
+        conversationId: conversationID,
         price: totalPrice,
         paidPrice: totalPrice,
         currency: 'TRY',
-        installments: '1',           // taksit!!
-        // callbackUrl: process.env.FINISH_PAYMENT_URL,
+        installments: '1',
         paymentCard: {
             cardHolderName: cardHolderName,
             cardNumber: cardNumber,
@@ -219,10 +225,10 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
             name: user.name,
             surname: user.surname,
             identityNumber: "11111111111",
-            city: user.City.name,               // ?
+            city: user.City.name,
             country: "Türkiye",
             email: "default@defaulttt.com",
-            ip: 'localhost',                 // server ip
+            ip: 'localhost',
             registrationAddress: "Yokkkkk"
         },
         billingAddress: {
@@ -251,13 +257,11 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
         ]
     };
 
-
-    console.log(request);
     const result = await new Promise((resolve, reject) => {
 
 
-        iyzipay.payment.create(request, async(err,ress) => {
-            
+        iyzipay.payment.create(request, async (err, ress) => {
+
 
             if (err) {
 
@@ -266,29 +270,30 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
                 if (ress.status === "success") {
                     if (ress.conversationId == conversationID) {
 
-                        console.log(ress);
-                        
+
                         const reservation2 = await Reservation.update({ status: "payment_success", paymentTransactionID: ress.itemTransactions[0].paymentTransactionId }, { where: { id: reservation.id } })
 
 
                         const paymentt = await Payment.update({ status: "success" }, { where: { reservationID: reservation.id } })
 
 
-                        const returnRes = await Reservation.findOne({where: {id: reservation.id }})
-                        const paymentreturn = await Payment.findOne({where: {reservationID: reservation.id}})
+                        await createUserNotification(user.id, "Rezervasyon Oluşturuldu", `${coiffeur.name} isimli kuaföre ${formatDate(resDate)} tarihi için rezervasyonunu oluşturdun.`)
+                        await createCoiffeurNotification(coiffeur.id, "Bir Rezervasyon oluşturuldu.", `${user.name}, ${formatDate(reservation.resDate)} tarihi için rezervasyon oluşturdu onayını bekliyor!`)
+                        const returnRes = await Reservation.findOne({ where: { id: reservation.id } })
+                        const paymentreturn = await Payment.findOne({ where: { reservationID: reservation.id } })
 
                         return res.json({
                             success: 1,
-                            data: [{reservation: returnRes , payment: paymentreturn}],
+                            data: [{ reservation: returnRes, payment: paymentreturn }],
                             mesage: ""
                         })
                     }
                 } else {
 
 
-                    await Reservation.update({ status: "payment_failed", paymentTransactionID: ress.itemTransactions[0].paymentTransactionId }, { where: { id: reservation.id } })
+                    await Reservation.destroy({ where: { id: reservation.id } })
 
-                    await Payment.update({ status: "failed" }, { where: { reservationID: reservation.id } })
+                    await Payment.destroy({ where: { reservationID: reservation.id } })
 
 
                     return res.json({
@@ -300,38 +305,8 @@ const createReservation = tryCatchWrapper(async (req, res, next) => {
             }
         })
 
-
-        // iyzipay.threedsInitialize.create(request, async (err, result) => {
-
-
-        //     if (err) {
-
-        //         return next(new CustomError("Error occured in threedsInitialize method", -2));
-        //     } else {
-        //         if (result.status === "success") {
-        //             if (result.conversationId == conversationID) {
-
-        //                 const buffered = Buffer.from(result.threeDSHtmlContent, 'base64').toString("utf8");       // base64 to utf-8
-        //                 return res.json({
-        //                     success: 1,
-        //                     data: [{ Result: result, Buffered: buffered }],
-        //                     mesage: ""
-        //                 })
-        //             }
-        //         } else {
-
-
-        //             return res.json({
-        //                 success: -parseInt(result.errorCode),
-        //                 data: [],
-        //                 message: result.errorMessage
-        //             })
-        //         }
-        //     }
-        // });
     });
 
-    console.log(result);
     res.send("ok")
 
 })
@@ -372,21 +347,6 @@ const finishPayment = async (req, res, next) => {
 
                             await Reservation.update({ status: "payment_success" }, { where: { id: resID } })
 
-                            // await new Promise((resolve, reject) => {
-                            //     iyzipay.approval.create({
-                            //         locale: Iyzipay.LOCALE.TR,
-                            //         conversationId: uuidv4(),
-                            //         paymentTransactionId: result.itemTransactions[0].paymentTransactionId,
-                            //     }, (err, result) => {
-                            //         if (err) {
-                            //             console.log(err);
-                            //             reject(err);
-                            //         } else {
-                            //             console.log(result);
-                            //             resolve(result);
-                            //         }
-                            //     });
-                            // });
                             return res.redirect(`${process.env.PAYMENT_SUCCESS_URL}`);
                         } else {
 
@@ -449,7 +409,7 @@ const listReservations = tryCatchWrapper(async (req, res, next) => {
     const count = await Reservation.count({ where: whereClause })
 
 
-    const paginated = pagination({ data: reservations, count, per_page, page })
+    const paginated = pagination({ data: formattedReservations, count, per_page, page })
 
     res.json(new Response(1, { reservations: paginated }, ""))
 
@@ -465,12 +425,12 @@ const searchCoiffeur = tryCatchWrapper(async (req, res, next) => {
 
 
     const whereClause = {
-        
+
     }
-    
-    if(name){
+
+    if (name) {
         whereClause.name = { [Op.iLike]: `%${name}%` }
-        
+
     }
     const includeConditions = {
 
@@ -510,11 +470,100 @@ const searchCoiffeur = tryCatchWrapper(async (req, res, next) => {
 })
 
 
+
+const cancelReservation = tryCatchWrapper(async (req, res, next) => {
+
+    const { reservationID } = req.body
+
+
+    const user = await User.findOne({where: {id: req.user.result}})
+
+    const reservation = await Reservation.findOne({
+        where: {
+            id: reservationID,
+            userID: req.user.result,
+        }
+    })
+
+
+    if (reservation.status == "finished") {
+        return res.json(new Response(-1, null, "Tamamlanan rezervasyonlar iptal edilemez!"))
+    }
+    if (reservation.status == "payment_failed") {
+        return res.json(new Response(-1, null, "ödemesi tamamlanmayan rezervasyonlar iptal edilemez!"))
+    }
+    if (reservation.status == "canceled") {
+        return res.json(new Response(-1, null, "Zaten iptal edilmiş"))
+    }
+
+    const now = newDate()
+
+    const resDate = new Date(reservation.resDate)
+
+
+    resDate.setHours(resDate.getHours() - 1)
+
+
+    if (now > resDate) {
+        return res.json(new Response(-1, null, "Rezervasyon en geç 1 saat kala iptal edilebilir."))
+
+    }
+
+
+
+    const request = {
+        paymentTransactionId: reservation.paymentTransactionID,
+        price: reservation.totalPrice
+    }
+
+
+    const result = await new Promise((resolve, reject) => {
+
+
+        iyzipay.refund.create(request, async (err, ress) => {
+
+
+            if (err) {
+
+                return next(new CustomError("Error occured in method", -2));
+            } else {
+                if (ress.status === "success") {
+
+                    await Reservation.update({ status: "canceled" }, { where: { id: reservation.id } })
+                    await Payment.update({ status: "canceled" }, { where: { reservationID: reservation.id } })
+
+                    await createCoiffeurNotification(reservation.coiffeurID , "Bir Rezervasyon İptal Edildi." , `${user.name} ${user.surname} ${formatDate(new Date(reservation.resDate))} Tarihindeki rezervasyonunu iptal etti.`)
+
+
+
+                    return res.json(new Response(1, null, "Başarıyla iade edildi"))
+                } else {
+
+
+                    return res.json({
+                        success: -parseInt(ress.errorCode),
+                        data: [],
+                        message: ress.errorMessage
+                    })
+                }
+            }
+        })
+
+
+
+
+
+    })
+})
+
+
+
 module.exports = {
     login,
     register,
     createReservation,
     finishPayment,
     listReservations,
-    searchCoiffeur
+    searchCoiffeur,
+    cancelReservation
 }

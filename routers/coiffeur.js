@@ -23,4 +23,6 @@ router.delete("/delete-reservation-type/:id" , coiffeurAuth , controller.deleteR
 router.post("/list-reservations" , coiffeurAuth , controller.listReservations)
 router.post("/approve-reservation" , coiffeurAuth , controller.approveReservation)
 
+router.post("/set-finished-reservation" ,coiffeurAuth,controller.setFinished )
+
 module.exports = router;

@@ -16,5 +16,7 @@ router.post("/list-reservations" , userAuth , controller.listReservations)
 
 router.post("/search-coiffeurs" , controller.searchCoiffeur)
 
+router.post("/cancel-reservation", userAuth , controller.cancelReservation)
+
 
 module.exports = router;

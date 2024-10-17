@@ -10,6 +10,7 @@ const { pagination } = require("../helpers/pagination");
 const Iyzipay = require('iyzipay');
 const { v4: uuidv4 } = require('uuid');
 const { tryCatchWrapper } = require("../helpers/tryCatchWrapper");
+const { newDate } = require("../helpers/formatDate");
 
 
 const iyzipay = new Iyzipay({
@@ -321,18 +322,18 @@ const listReservations = tryCatchWrapper(async (req, res, next) => {
     const endDate = new Date(date);
     endDate.setHours(23, 59, 59, 999); // Son saniyeyi doğru ayarlayın
 
-    console.log(isApproved);
     const reservations = await Reservation.findAll({
         where: {
             coiffeurID: req.coiffeur.result,
             status: {
-                [Op.or]: ["payment_success", "waiting" , "rejected"]
+                [Op.or]: ["payment_success", "waiting", "finished", "rejected"]
             },
             isApproved: isApproved,
             resDate: {
                 [Op.between]: [startDate, endDate]
             }
         },
+        order: [["resDate" ,"DESC"]]
     });
 
     // ReservationType sorgularını Promise.all ile topluca çalıştırın
@@ -356,12 +357,94 @@ const listReservations = tryCatchWrapper(async (req, res, next) => {
 const approveReservation = tryCatchWrapper(async (req, res, next) => {
     const { resID, approve } = req.body
 
-    await Reservation.update({ isApproved: approve, status: "waiting" }, { where: { id: resID, status: "payment_success", resDate: { [Op.gte]: new Date() } } })
+    const reserv2 = await Reservation.findOne({ where: { id: resID } })
 
+    if (reserv2.status == "rejected") {
+        return res.json(new Response(-1, null, "İptal edilmiş bir rezervasyonda değişiklik yapamazsın"))
+    }
+
+    const request = {
+        paymentTransactionId: reserv2.paymentTransactionID,
+        price: reserv2.totalPrice
+    }
+
+
+    if (approve == false) {
+
+        const result = await new Promise((resolve, reject) => {
+
+
+            iyzipay.refund.create(request, async (err, ress) => {
+
+
+                if (err) {
+
+                    return next(new CustomError("Error occured in method", -2));
+                } else {
+                    if (ress.status === "success") {
+
+                        await Reservation.update({ isApproved: false, status: "rejected" }, { where: { id: reserv2.id } })
+                        await Payment.update({ status: "canceled" }, { where: { reservationID: reserv2.id } })
+                        return res.json(new Response(1, null, "Başarıyla iade edildi"))
+                    } else {
+
+
+                        return res.json({
+                            success: -parseInt(ress.errorCode),
+                            data: [],
+                            message: ress.errorMessage
+                        })
+                    }
+                }
+            })
+
+
+
+
+
+        })
+    }
+
+
+    if (approve == true) {
+        const now = newDate()
+        if (now > reserv2.resDate) {
+            return res.json(new Response(-1, {}, "Zamanı geçmiş rezervasyonları onaylayamazsınız"));
+        }
+    }
+
+    console.log(new Date());
+    await Reservation.update({ isApproved: approve }, { where: { id: resID, resDate: { [Op.gte]: newDate() } } })
 
     const reserv = await Reservation.findOne({ where: { id: resID } })
     res.json(new Response(1, { reservation: reserv }, ""));
 })
+
+
+
+const setFinished = tryCatchWrapper(async (req, res, next) => {
+    const { reservationID } = req.body
+
+    const reservation = await Reservation.findOne({ where: { id: reservationID } })
+
+    if (new Date() < new Date(reservation.resDate)) {
+        return res.json(new Response(-1, null, "Saati gelmemiş rezervasyonları tamamlandı olarak işaretleyemezsin."))
+
+    }
+    if (reservation.status == "finished") {
+
+        return res.json(new Response(-1, null, "Bu rezervasyon zaten tamamlanmış."))
+    }
+    if (reservation.isApproved != true) {
+
+        return res.json(new Response(-1, null, "Onaylanmamış Rezervasyonları tamamlanmış olarak işaretleyemezsiniz."))
+    }
+
+    await Reservation.update({ status: "finished" }, { where: { id: reservationID } })
+    res.json(new Response(1, {}, "Tamamlandı"));
+
+})
+
 
 module.exports = {
     register,
@@ -377,6 +460,7 @@ module.exports = {
     deleteReservationType,
 
     listReservations,
-    approveReservation
+    approveReservation,
+    setFinished
 
 }
