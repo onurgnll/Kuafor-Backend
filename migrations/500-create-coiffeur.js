@@ -37,6 +37,16 @@ module.exports = {
         type: Sequelize.STRING,
         allowNull: true,
       },
+      totalPoint: {
+        type: Sequelize.INTEGER,
+        allowNull: true,
+        defaultValue: 0
+      },
+      reviewCount: {
+        type: Sequelize.INTEGER,
+        allowNull: true,
+        defaultValue: 0
+      },
       address: {
         type: Sequelize.STRING,
         allowNull: true,

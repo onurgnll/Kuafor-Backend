@@ -95,6 +95,16 @@ module.exports = (sequelize, DataTypes) => {
           key: 'id',
         },
       },
+      totalPoint: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 0
+      },
+      reviewCount: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 0
+      },
       accessToken: {
         type: DataTypes.STRING(1000),
         allowNull: true,

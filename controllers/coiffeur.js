@@ -11,6 +11,7 @@ const Iyzipay = require('iyzipay');
 const { v4: uuidv4 } = require('uuid');
 const { tryCatchWrapper } = require("../helpers/tryCatchWrapper");
 const { newDate } = require("../helpers/formatDate");
+const { createUserNotification } = require("./notifications");
 
 
 const iyzipay = new Iyzipay({
@@ -333,7 +334,7 @@ const listReservations = tryCatchWrapper(async (req, res, next) => {
                 [Op.between]: [startDate, endDate]
             }
         },
-        order: [["resDate" ,"DESC"]]
+        order: [["resDate", "DESC"]]
     });
 
     // ReservationType sorgularını Promise.all ile topluca çalıştırın
@@ -368,6 +369,8 @@ const approveReservation = tryCatchWrapper(async (req, res, next) => {
         price: reserv2.totalPrice
     }
 
+    const coiffeur = await Coiffeur.findOne({where: {id: req.coiffeur.result}})
+
 
     if (approve == false) {
 
@@ -383,6 +386,7 @@ const approveReservation = tryCatchWrapper(async (req, res, next) => {
                 } else {
                     if (ress.status === "success") {
 
+                        await createUserNotification(reserv2.userID, "Rezervasyon reddedildi" , `${coiffeur.name} yaptığınız rezervasyonu reddetti.`)
                         await Reservation.update({ isApproved: false, status: "rejected" }, { where: { id: reserv2.id } })
                         await Payment.update({ status: "canceled" }, { where: { reservationID: reserv2.id } })
                         return res.json(new Response(1, null, "Başarıyla iade edildi"))
@@ -413,7 +417,8 @@ const approveReservation = tryCatchWrapper(async (req, res, next) => {
         }
     }
 
-    console.log(new Date());
+    console.log(new Date()); 
+    await createUserNotification(reserv2.userID, "Rezervasyon onaylandı." , `${coiffeur.name} yaptığınız rezervasyonu onayladı.`)
     await Reservation.update({ isApproved: approve }, { where: { id: resID, resDate: { [Op.gte]: newDate() } } })
 
     const reserv = await Reservation.findOne({ where: { id: resID } })
@@ -440,6 +445,7 @@ const setFinished = tryCatchWrapper(async (req, res, next) => {
         return res.json(new Response(-1, null, "Onaylanmamış Rezervasyonları tamamlanmış olarak işaretleyemezsiniz."))
     }
 
+    await createUserNotification(reservation.userID, "Rezervasyon tamamlandı." , `Rezervasyonunuz tamamlandı kuaförü değerlendirebilirsiniz.`)
     await Reservation.update({ status: "finished" }, { where: { id: reservationID } })
     res.json(new Response(1, {}, "Tamamlandı"));
 

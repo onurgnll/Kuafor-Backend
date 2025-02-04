@@ -15,6 +15,7 @@ router.post("/finish-payment" , controller.finishPayment)
 router.post("/list-reservations" , userAuth , controller.listReservations)
 
 router.post("/search-coiffeurs" , controller.searchCoiffeur)
+router.get("/get-coiffeur-details/:id" , controller.getCoiffeurDetails)
 
 router.post("/cancel-reservation", userAuth , controller.cancelReservation)
 

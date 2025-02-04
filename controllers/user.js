@@ -3,7 +3,7 @@
 const { where, Op, Sequelize } = require("sequelize");
 const { cryptPassword } = require("../helpers/cryptPassword");
 const Response = require("../responses/response");
-const { City, District, User, Coiffeur, Reservation, ReservationType, CoiffeurProperty, Payment } = require("../models");
+const { City, District, User, Coiffeur, Reservation, ReservationType, CoiffeurProperty, Payment, Review } = require("../models");
 const CustomError = require("../errors/CustomError");
 const bcrypt = require("bcrypt");
 const { generateAccessToken, generateRefreshToken } = require("../helpers/token");
@@ -432,15 +432,23 @@ const searchCoiffeur = tryCatchWrapper(async (req, res, next) => {
         whereClause.name = { [Op.iLike]: `%${name}%` }
 
     }
-    const includeConditions = {
+    const includeConditions = [
+        {
 
-        model: CoiffeurProperty,
-        where: {
+            model: CoiffeurProperty,
+            where: {
 
-            gender: gender || ["male", "female"],
+                gender: gender || ["male", "female"],
+            }
+
+        },
+        {
+            model: City
+        },
+        {
+            model: District
         }
-
-    }
+    ]
 
     if (cityID) {
         whereClause.cityID = cityID
@@ -476,7 +484,7 @@ const cancelReservation = tryCatchWrapper(async (req, res, next) => {
     const { reservationID } = req.body
 
 
-    const user = await User.findOne({where: {id: req.user.result}})
+    const user = await User.findOne({ where: { id: req.user.result } })
 
     const reservation = await Reservation.findOne({
         where: {
@@ -532,7 +540,7 @@ const cancelReservation = tryCatchWrapper(async (req, res, next) => {
                     await Reservation.update({ status: "canceled" }, { where: { id: reservation.id } })
                     await Payment.update({ status: "canceled" }, { where: { reservationID: reservation.id } })
 
-                    await createCoiffeurNotification(reservation.coiffeurID , "Bir Rezervasyon İptal Edildi." , `${user.name} ${user.surname} ${formatDate(new Date(reservation.resDate))} Tarihindeki rezervasyonunu iptal etti.`)
+                    await createCoiffeurNotification(reservation.coiffeurID, "Bir Rezervasyon İptal Edildi.", `${user.name} ${user.surname} ${formatDate(new Date(reservation.resDate))} Tarihindeki rezervasyonunu iptal etti.`)
 
 
 
@@ -558,6 +566,56 @@ const cancelReservation = tryCatchWrapper(async (req, res, next) => {
 
 
 
+const reviewCoiffeur = tryCatchWrapper(async (req, res, next) => {
+
+    const { coiffeurID, content, point } = req.body
+
+    const userID = req.user.result
+
+
+
+    const review = await Review.findOne({ where: { userID, coiffeurID } })
+
+    if (review) return res.json(new Response(-1, null, "Zaten değerlendirmişsin."));
+
+
+    const reservation = await Reservation.findOne({ where: { userID, coiffeurID, status: "finished" } })
+
+    if (!reservation) return res.json(new Response(-1, null, "Bu kuaförde tamamlanan rezervasyon yok."));
+
+
+    const coiff = await Coiffeur.findOne({ where: { id: coiffeurID } })
+
+    const revieww = await Review.create({
+        userID,
+        coiffeurID,
+        content,
+        point
+    })
+
+    const user = await User.findOne({ where: { id: userID } })
+
+    await createCoiffeurNotification(coiffeurID, "Kuaförün bir müşteri tarafından değerlendirildi", `${user.name} ${user.surname} verdiğin hizmete ${point} yıldız verdi.`)
+
+    await Coiffeur.update({ totalPoint: (coiff.totalPoint + point), reviewCount: (coiff.reviewCount + 1) }, { where: { id: coiffeurID } })
+
+    return res.json(new Response(1, { review: revieww }, ""))
+
+})
+
+
+const getCoiffeurDetails = tryCatchWrapper(async (req, res, next) => {
+    const {id} = req.params
+
+    
+    const coiffeur = await Coiffeur.findOne({ where: { id }  , include : [{model: City} , {model: District} , {model: CoiffeurProperty}]} )
+
+    if(!coiffeur) return res.json(new Response(-1, {  }, "Böyle bir kuaför bulunamadı"))
+    return res.json(new Response(1, { coiffeur }, ""))
+
+})
+
+
 module.exports = {
     login,
     register,
@@ -565,5 +623,6 @@ module.exports = {
     finishPayment,
     listReservations,
     searchCoiffeur,
-    cancelReservation
+    cancelReservation,
+    getCoiffeurDetails
 }
